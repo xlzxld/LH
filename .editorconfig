@@ -1,0 +1,25 @@
+# 编辑器与文件格式统一规范（所有贡献者生效，主流编辑器自动读取）
+# 项目语言是中文 + Python：统一 UTF-8、LF、4 空格缩进
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.py]
+indent_style = space
+indent_size = 4
+
+[*.{md,rst}]
+# Markdown 两行末尾空格是合法换行语法，不删
+trim_trailing_whitespace = false
+
+[*.{bat,cmd,ps1}]
+# Windows 脚本保持 CRLF（某些老工具链解析 LF 会出问题）
+end_of_line = crlf
+
+[*.{yml,yaml,json,toml,cfg,ini}]
+indent_style = space
+indent_size = 2

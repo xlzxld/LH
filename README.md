@@ -150,6 +150,12 @@ python code/ch04_backtest/run_dual_ma.py
 
 > 📄 授权说明：`code/` 与 `scripts/` 下的代码采用 MIT；`docs/` 教程文字采用 CC BY-NC-SA 4.0（可署名转载、非商用），详见 `LICENSE`。
 
+## 📐 项目规范
+
+- [CONTRIBUTING.md](CONTRIBUTING.md) —— 开发/提交/文档同步规范（约定式提交、测试门禁、目标仓位契约）
+- [CHANGELOG.md](CHANGELOG.md) —— 版本变更历史
+- 代码 MIT、教程文字 CC BY-NC-SA 4.0，见 [LICENSE](LICENSE)
+
 ## 🙏 站在巨人的肩膀上
 
 教程大量借力开源社区（思路与致谢，均在本仓库代码之外）：

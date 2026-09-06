@@ -1,0 +1,13 @@
+# 秘密与本地文件，绝不提交
+.env
+data/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# 内部评审工件（不面向读者）
+docs/reviews/
+
+# AI 工具内部工件
+.zcode/

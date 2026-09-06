@@ -1,0 +1,38 @@
+# ============================================================
+# 定时任务示例集（第 10 章配套）—— 三种方案按你的机器选用
+# 目标：每天收盘后自动跑一次 A 股监测，有信号就推微信
+# ============================================================
+
+# ---------- 方案A：Windows 任务计划（本机常开就用它） ----------
+# 管理员 PowerShell 执行一次即可（路径按实际修改）：
+#   （把 <项目根目录> 换成你的实际路径）
+#   schtasks /Create /TN "A股监测" /SC DAILY /ST 15:10 /TR ^
+#     "\"<项目根目录>\.venv\Scripts\python.exe\" ^
+#      \"<项目根目录>\code\ch08_monitor\monitor_astock.py\" --once"
+#
+# 删除任务： schtasks /Delete /TN "A股监测" /F
+# 立即测试： schtasks /Run /TN "A股监测"
+
+# ---------- 方案B：Linux cron（VPS / 群晖 / 树莓派） ----------
+# crontab -e 后添加（北京时间需设置好系统时区 timedatectl set-timezone Asia/Shanghai）：
+# 每个交易日 15:10 运行
+10 15 * * 1-5  cd /opt/quant && ./.venv/bin/python code/ch08_monitor/monitor_astock.py --once >> data/monitor.log 2>&1
+# 每天早上 8:30 推送一份完整晨报
+30 8 * * 1-5   cd /opt/quant && ./.venv/bin/python code/ch08_monitor/monitor_astock.py --once --force >> data/monitor.log 2>&1
+
+# ---------- 方案C：Linux systemd timer（比 cron 更现代，崩溃自动重启用 --loop 模式代替） ----------
+# /etc/systemd/system/astock-monitor.service
+[Unit]
+Description=A股监测机器人
+After=network-online.target
+
+[Service]
+WorkingDirectory=/opt/quant
+ExecStart=/opt/quant/.venv/bin/python code/ch08_monitor/monitor_astock.py --loop --interval 300
+Restart=always
+RestartSec=30
+Environment=TZ=Asia/Shanghai
+Environment=PYTHONUTF8=1
+
+[Install]
+WantedBy=multi-user.target

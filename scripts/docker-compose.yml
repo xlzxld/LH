@@ -1,0 +1,22 @@
+# 可选：用 Docker 常驻运行监测机器人（第 10 章）
+# 用法：
+#   docker compose up -d          # 后台启动
+#   docker compose logs -f        # 看日志
+#   docker compose down           # 停止
+#
+# 注意：需要先在宿主机准备好 .env，并把数据目录挂出来持久化状态文件。
+services:
+  astock-monitor:
+    build:
+      context: ..
+      dockerfile: scripts/Dockerfile
+    container_name: astock-monitor
+    restart: unless-stopped        # 崩了/重启机器自动拉起
+    env_file:
+      - ../.env                    # 复用项目根目录的 .env
+    environment:
+      - TZ=Asia/Shanghai           # 必须北京时间，交易时段判断才正确
+      - PYTHONUTF8=1
+    volumes:
+      - ../data:/app/data          # 状态文件持久化
+    command: python code/ch08_monitor/monitor_astock.py --loop --interval 300

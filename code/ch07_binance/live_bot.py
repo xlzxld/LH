@@ -379,7 +379,7 @@ def main() -> None:
         try:
             time.sleep(poll)
         except KeyboardInterrupt:
-            pass
+            break  # 睡眠期按 Ctrl+C 也要退出（此前 pass 会吞掉按键，机器人"按不住"）
 
 
 if __name__ == "__main__":

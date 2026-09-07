@@ -315,3 +315,32 @@ def test_fractional_target_does_not_sell_existing_holding():
     finally:
         lb.fetch_crypto_ohlcv = orig_candles
         lb.dual_ma_weights = orig_weights
+
+
+def test_ctrl_c_during_sleep_exits_cleanly(monkeypatch):
+    """B-01 回归疫苗：睡眠期按 Ctrl+C 必须退出主循环。
+    （旧代码 sleep 段 except KeyboardInterrupt: pass 会吞掉按键，机器人"按不住"，
+    修复前本测试以"第二次 run_once 仍被执行"的形式失败。）"""
+    import sys
+
+    calls = {"run_once": 0, "sleep": 0}
+
+    def fake_run_once(*a, **k):
+        calls["run_once"] += 1
+        if calls["run_once"] >= 2:
+            raise AssertionError("bug 复现：Ctrl+C 在 sleep 期被吞掉，主循环没有退出")
+
+    def fake_sleep(_seconds):
+        calls["sleep"] += 1
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(lb, "run_once", fake_run_once)
+    monkeypatch.setattr(lb, "maybe_heartbeat", lambda *a, **k: None)
+    monkeypatch.setattr(lb.time, "sleep", fake_sleep)
+    monkeypatch.setattr(lb, "make_exchange", lambda: (FakeExchange(), False))
+    monkeypatch.setattr(lb, "setup_logging", lambda: _quiet_logger())
+    monkeypatch.setattr(sys, "argv", ["live_bot.py"])
+
+    lb.main()  # 修复后：sleep 抛 KI -> break -> main 正常返回
+    assert calls["run_once"] == 1
+    assert calls["sleep"] == 1

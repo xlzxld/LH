@@ -1,0 +1,25 @@
+name: gate
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # Python 项目门禁（AGENTS.md §2：fmt/lint 暂无，test=pytest）
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pre-commit
+      - name: Secrets scan (gitleaks, all files)
+        run: pre-commit run --all-files
+      - name: Verify (fmt-check / lint / test / build)
+        run: make verify TEST_CMD="python -m pytest code/tests/ -q"

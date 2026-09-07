@@ -58,6 +58,8 @@ def get_bool(key: str, default: bool = False) -> bool:
 
 def get_int(key: str, default: int) -> int:
     val = get(key)
+    if val is not None and "." in val:  # "60.5" 这类笔误会被截断成 60，必须吭声
+        print(f"[警告] 配置 {key}={val!r} 不是整数，已截断为 {int(float(val))}；请检查 .env")
     try:
         return int(float(val)) if val is not None else default
     except (TypeError, ValueError):

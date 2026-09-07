@@ -56,3 +56,19 @@
 - 币安双均线实盘机器人（dry-run → testnet → 真钱三重确认）
 - A股监测机器人（金叉/新高/回撤信号 → Server酱/PushPlus/企业微信推送）
 - 聚宽平台策略（粘贴即用）；11 个单元测试
+
+## [1.2.1] - 2026-09-07
+
+### 体检修复（AUDIT-SPEC 四靶心扫描，P2×4 + P3×7）
+
+#### 修复
+- **fix(live_bot)**: 睡眠期 Ctrl+C 被吞掉，机器人"按不住"——改 `break` 立即退出，附主循环级回归测试（B-01）
+- fix(config): `get_int` 对 "60.5" 这类小数笔误打印警告，不再静默截断（C-02）
+- chore: 输出编码降级失败改为吭声（原裸 except pass，R-3.1 模式）（C-03）
+- chore: 自检脚本去掉重复 sys.path 插入（C-06）
+- chore: testnet_check 横幅交易所名随 EXCHANGE_ID 走，不再写死"币安"（C-04）
+- docs: 补"推送内容对渠道服务方可见"提示（C-05）；TODOS 记录 monitor 信号逻辑去重观察项（B-04）
+
+#### 移除
+- refactor: 删除零引用函数 `datasource.is_etf`、`config.get_list`（B-02/B-03；
+  回滚 = `git revert` 本提交）

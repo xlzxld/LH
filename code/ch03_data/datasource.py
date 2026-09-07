@@ -164,11 +164,6 @@ def fetch_astock_daily_akshare(code: str, start: str, end: str, adjust: str = "q
     return df.set_index("date")[["open", "close", "high", "low", "volume"]].astype(float)
 
 
-def is_etf(code: str) -> bool:
-    """粗略判断是否 ETF：沪 51/56/58 开头，深 15/16 开头。"""
-    return code[:2] in {"51", "56", "58", "15", "16"}
-
-
 # ================================================================ 加密货币
 
 def fetch_crypto_ohlcv(

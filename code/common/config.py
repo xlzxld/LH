@@ -74,14 +74,6 @@ def get_float(key: str, default: float) -> float:
         return default
 
 
-def get_list(key: str, default: list[str] | None = None) -> list[str]:
-    """读取逗号分隔的列表配置，如 ``WATCHLIST=etf:510300,stock:600519``。"""
-    val = get(key)
-    if not val:
-        return default or []
-    return [item.strip() for item in val.split(",") if item.strip()]
-
-
 # ============ 项目里常用的配置项快捷方式 ============
 
 def notify_channel() -> str:

@@ -14,6 +14,3 @@ docs/reviews/
 
 # Node（commitlint 本地依赖）
 node_modules/
-
-# PAT 缺 workflow scope，gate.yml 暂缓入库（补权限后 git add 恢复）
-.github/workflows/gate.yml

@@ -13,8 +13,8 @@ from pathlib import Path
 if hasattr(sys.stdout, "reconfigure"):
     try:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    except Exception:
-        pass
+    except Exception as exc:  # 降级失败要吭声：否则后续 emoji 打印崩溃时无从排查
+        print(f"[警告] 输出编码切换失败（{exc}），保留默认编码", file=sys.stderr)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "code"))
@@ -91,7 +91,6 @@ def main() -> None:
     env_file = PROJECT_ROOT / ".env"
     if env_file.exists():
         print(f"{OK} .env 配置文件存在")
-        sys.path.insert(0, str(PROJECT_ROOT / "code"))
         from common import config
         config.load_env()
         channel = config.notify_channel()

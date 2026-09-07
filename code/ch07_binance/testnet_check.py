@@ -29,9 +29,8 @@ def make_exchange(testnet: bool):
 def main() -> None:
     testnet = config.use_testnet()
     tag = "测试网 testnet.binance.vision" if testnet else "真实账户（小心！）"
-    print(f"目标: 币安 {tag}\n")
-
     exchange = make_exchange(testnet)
+    print(f"目标: {exchange.id} {tag}\n")  # 交易所名随 EXCHANGE_ID 走，别写死"币安"
 
     # ---- 测试 1：公开行情（不需要 API Key，只测网络）
     try:

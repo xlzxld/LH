@@ -32,8 +32,8 @@ for _stream in (sys.stdout, sys.stderr):
     if hasattr(_stream, "reconfigure"):
         try:
             _stream.reconfigure(encoding="utf-8", errors="replace")
-        except Exception:
-            pass
+        except Exception as exc:  # 降级失败要吭声：否则后续 emoji print 崩溃时无从排查
+            print(f"[警告] 输出编码切换失败（{exc}），保留默认编码", file=sys.stderr)
 
 
 class NotifyError(RuntimeError):

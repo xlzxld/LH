@@ -105,6 +105,7 @@ python code/ch04_backtest/run_dual_ma.py
 │   ├── 12-部署与运维.md
 │   ├── 13-常见问题FAQ与进阶路线.md
 │   └── 附录-术语表.md             40 个术语的"人话版"词典
+├── notebooks/                📓 零安装体验：第 4 章双均线回测笔记本（Colab 可直接打开）
 ├── code/                     💻 全部可运行代码
 │   ├── common/               配置加载 / 微信推送 / 交易所工厂 / 状态
 │   ├── ch03_data/            数据获取（东方财富 / akshare / ccxt）

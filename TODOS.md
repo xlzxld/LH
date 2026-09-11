@@ -22,12 +22,13 @@
 - **Why**：自学者无法验证作业，"只看不练学不会"形同虚设。
 - **状态**：已完成。`solutions/ch00~ch13.md` 共 14 个文件，每题含参考答案+预期输出+讲解。
 
-### 4. 零安装首日体验（来源：CEO F3）
+### 4. 零安装首日体验（✅ 已完成 2026-09-11）
 - **What**：捆绑样例 CSV + Colab/Jupyter 笔记本版第 4 章，先看到回测再装环境。
 - **Why**：环境搭建是零基础漏斗最大流失点（TTHW 实测 45-75 分钟）。
-- **进展**：样例 CSV 生成器已落地（2026-09-09，`code/ch03_data/make_sample_data.py`
-  固定种子 42，配合 `run_dual_ma.py --csv` 离线回测）；剩余 Colab/Jupyter 笔记本。
-- **Effort**：人 1 天 / CC 1 小时。
+- **状态**：已完成。样例 CSV 生成器（`code/ch03_data/make_sample_data.py`，固定种子 42）
+  与 `run_dual_ma.py --csv` 离线回测于 2026-09-09 落地；`notebooks/ch04-dual-ma-quickstart.ipynb`
+  于 2026-09-11 补齐——Colab 可直接打开、不联网不装包，且与正式引擎对账期末净值逐位一致。
+- **Effort**：人 1 天 / CC 1 小时（已完成）。
 
 ### 5. OKX 端到端实测 + 多交易所工厂化（来源：Eng M5/F18）
 - **What**：在可访问 OKX 的网络里走通 拉数据→测试网→下单 全链路；`common/exchange.py` 按交易所注册表化（keys/沙箱支持/最小下单额）。

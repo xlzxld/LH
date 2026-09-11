@@ -37,6 +37,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from ch03_data import datasource  # noqa: E402
+from ch04_backtest.strategy import dual_ma_weights  # noqa: E402
 from common import config  # noqa: E402
 from common.notify import send_text  # noqa: E402
 from common.state import load_state, save_state  # noqa: E402
@@ -78,6 +79,10 @@ def check_signals(df: pd.DataFrame, code: str) -> list[dict]:
     """
     对单个标的（已收盘K线）计算所有规则，返回触发的信号列表。
     每条信号: {rule, direction, key, note}
+
+    规则1（均线金叉/死叉）不在此处手写均线，而是复用唯一真源
+    ``ch04_backtest.strategy.dual_ma_weights``——保证监测、回测、实盘
+    三处的信号语义永远一致。
     """
     signals: list[dict] = []
     if len(df) < 10:
@@ -88,14 +93,16 @@ def check_signals(df: pd.DataFrame, code: str) -> list[dict]:
     last_price = float(close.iloc[-1])
 
     # ---- 规则1：均线金叉/死叉（状态机：只在状态变化的当天发一次）
+    # 信号语义唯一真源 = ch04_backtest.strategy.dual_ma_weights（回测 / 实盘 / 监测三方共用），
+    # 消除此前第三份手写实现——改信号语义时三处不会各自漂移（TODOS #0）
     fast_n = config.get_int("MA_FAST", 20)
     slow_n = config.get_int("MA_SLOW", 60)
     if len(df) >= slow_n + 1:
-        ma_fast = close.rolling(fast_n).mean()
-        ma_slow = close.rolling(slow_n).mean()
-        above = ma_fast > ma_slow  # NaN 参与比较得 False，布尔序列可直接取
-        state_today = bool(above.iloc[-1])
-        state_yesterday = bool(above.iloc[-2])
+        weights = dual_ma_weights(df, fast_n, slow_n)
+        # 目标仓位 >0 即"快线在慢线上方"；NaN（慢线未就绪）参与比较为 False，
+        # 与旧实现 `ma_fast > ma_slow`（NaN 得 False）语义完全一致
+        state_today = bool(weights.iloc[-1] > 0)
+        state_yesterday = bool(weights.iloc[-2] > 0)
         if state_today and not state_yesterday:
             signals.append({"rule": "均线金叉", "direction": "买入参考",
                             "key": f"ma_gold_{last_date}",

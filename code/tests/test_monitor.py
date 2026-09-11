@@ -10,6 +10,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from ch04_backtest.strategy import dual_ma_weights  # noqa: E402
 import common.config as cfg  # noqa: E402
 from ch08_monitor.monitor_astock import (  # noqa: E402
     check_signals, commit, in_trading_hours, parse_watchlist, pick_new, signal_frame,
@@ -41,6 +42,31 @@ def test_golden_and_death_cross(monkeypatch):
     closes = [100, 102, 104, 106, 108, 110, 112, 114, 116, 90]
     sigs = check_signals(make_df(closes), "510300")
     assert any(s["key"].startswith("ma_dead") for s in sigs)
+
+
+def test_ma_signal_same_source_as_shared_strategy(monkeypatch):
+    """规则1 必须与唯一真源 dual_ma_weights 同源（TODOS #0 去重契约）。
+
+    这是"监测信号不许和回测/实盘漂移"的护栏：任何一侧改了金叉/死叉语义，
+    本用例立刻变红。
+    """
+    _flat_config(monkeypatch)
+    cases = [
+        ([120, 118, 116, 114, 112, 110, 108, 106, 104, 130], "ma_gold"),  # 末根金叉
+        ([100, 102, 104, 106, 108, 110, 112, 114, 116, 90], "ma_dead"),   # 末根死叉
+        ([100, 101, 102, 103, 104, 105, 106, 107, 108, 109], None),       # 状态未翻转
+    ]
+    for closes, expect in cases:
+        df = make_df(closes)
+        got = {s["key"].rsplit("_", 1)[0]
+               for s in check_signals(df, "510300")
+               if s["key"].startswith(("ma_gold", "ma_dead"))}
+        w = dual_ma_weights(df, 3, 5)
+        today, yesterday = bool(w.iloc[-1] > 0), bool(w.iloc[-2] > 0)
+        derived = ("ma_gold" if (today and not yesterday)
+                   else "ma_dead" if (yesterday and not today) else None)
+        assert derived == expect, f"用例构造有误（真源未产生预期翻转）: {closes}"
+        assert got == ({expect} if expect else set())
 
 
 def test_breakout_and_drawdown(monkeypatch):

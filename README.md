@@ -3,7 +3,7 @@
 > 一个能让**零基础小白**从"不知道量化是什么"走到"**真实盘交易**"的完整教程项目。
 > 全部代码在本仓库内、可直接运行、有单元测试；教程在 `docs/` 下按章组织。
 
-![回测示例](data/output/dual_ma_BTCUSDT.png)
+![回测示例](docs/images/dual_ma_BTCUSDT.png)
 
 ---
 

@@ -14,3 +14,7 @@ docs/reviews/
 
 # Node（commitlint 本地依赖）
 node_modules/
+
+# 本地 Agent 工作区与同步器机器记录（不属于项目内容）
+.workbuddy/
+.agents/.source

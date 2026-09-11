@@ -18,6 +18,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from common import config  # noqa: E402
+from common.exchange import api_key_name, sandbox_active  # noqa: E402
 
 
 def make_exchange(testnet: bool):
@@ -28,9 +29,12 @@ def make_exchange(testnet: bool):
 
 def main() -> None:
     testnet = config.use_testnet()
-    tag = "测试网 testnet.binance.vision" if testnet else "真实账户（小心！）"
     exchange = make_exchange(testnet)
-    print(f"目标: {exchange.id} {tag}\n")  # 交易所名随 EXCHANGE_ID 走，别写死"币安"
+    # 横幅必须读实例的真实沙箱态（与 live_bot 的 resolve_mode 同一教训）：
+    # EXCHANGE_ID=okx 等非币安交易所不受 BINANCE_TESTNET 开关控制，配置旗标说了不算
+    sandbox = sandbox_active(exchange)
+    tag = "沙箱/测试网" if sandbox else "真实账户（小心！）"
+    print(f"目标: {exchange.id} {tag}\n")  # 交易所名与沙箱态都随实例走，别信配置
 
     # ---- 测试 1：公开行情（不需要 API Key，只测网络）
     try:
@@ -41,7 +45,7 @@ def main() -> None:
         return
 
     # ---- 测试 2：账户读取权限
-    if not config.get("BINANCE_API_KEY"):
+    if not config.get(api_key_name(config.exchange_id())):
         print("[2/3] 跳过（未配置 API Key）。去 testnet.binance.vision 注册即可拿到测试 Key")
         return
     try:

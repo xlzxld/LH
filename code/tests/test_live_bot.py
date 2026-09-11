@@ -16,7 +16,9 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import ch07_binance.live_bot as lb  # noqa: E402
-from ch07_binance.live_bot import fmt_timeframe_seconds, resolve_mode, run_once  # noqa: E402
+from ch07_binance.live_bot import (  # noqa: E402
+    fmt_timeframe_seconds, min_notional, resolve_mode, run_once,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -185,6 +187,18 @@ def test_timeframe_validation_friendly():
     with pytest.raises(ValueError, match="非法K线周期"):
         fmt_timeframe_seconds("2M")
     assert fmt_timeframe_seconds("1h") == 3600
+
+
+def test_min_notional_failure_warns_not_silent(capsys):
+    """回归疫苗：市场元数据读不到时可以降级用默认 5，但必须吭声——
+    静默吞异常（R-3.1 模式）会让"为什么总是按 5 USDT 判断灰尘"无从排查。"""
+
+    class BrokenMarket(FakeExchange):
+        def market(self, symbol):
+            raise RuntimeError("market metadata unavailable")
+
+    assert min_notional(BrokenMarket(), "BTC/USDT") == 5.0
+    assert "[警告]" in capsys.readouterr().out
 
 
 # ---------------------------------------------------------------- 止损（第 8 章风控在实盘侧落地）

@@ -112,6 +112,15 @@ def test_judge_verdict_overfit():
     assert any("过拟合" in m for m in msgs)
 
 
+def test_judge_verdict_both_negative_is_not_overfit():
+    """回归疫苗：样本内也亏钱时，绝不能说"样本内赚钱、样本外亏钱 = 过拟合"——
+    那是策略本身无效，不是过拟合（措辞错误会教错归因，见 1.2.2 体检）。"""
+    msgs = judge_verdict(-0.027, -0.023, 7)  # 2026-09 真实数据：样本内 -2.68%、样本外 -2.28%
+    assert not any("样本内赚钱" in m for m in msgs)
+    assert not any("典型过拟合" in m for m in msgs)  # 归因是"策略无效"，不是"过拟合"
+    assert any("不能上实盘" in m for m in msgs)
+
+
 def test_judge_verdict_few_trades():
     msgs = judge_verdict(0.10, 0.05, 3)    # 交易次数 < 5
     assert any("太少" in m for m in msgs)

@@ -67,6 +67,16 @@ def make_exchange(exchange_id: str | None = None, *, testnet: bool | None = None
     return exchange
 
 
+def api_key_name(ex_id: str | None = None) -> str:
+    """该交易所 API Key 在 .env 里的键名（与 make_exchange 的配钥逻辑一一对应）。
+
+    消灭"各自手写字典"的漂移：live_bot 判缺密钥、testnet_check 判跳过，
+    都必须问这里——EXCHANGE_ID=okx 时却去读 BINANCE_API_KEY 就是这类漂移的产物。
+    """
+    ex_id = (ex_id or config.exchange_id()).lower()
+    return {"binance": "BINANCE_API_KEY", "okx": "OKX_API_KEY"}.get(ex_id, "BINANCE_API_KEY")
+
+
 def sandbox_active(exchange) -> bool:
     """读交易所实例的真实沙箱态（binance 用了 set_sandbox_mode 时为 True）。
     下单开关必须以这里的结果为准，不要读配置旗标（见 live_bot.resolve_mode）。"""

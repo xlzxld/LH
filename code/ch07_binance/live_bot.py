@@ -34,6 +34,7 @@ sys.path.insert(0, str(sys_path))
 from ch03_data.datasource import fetch_crypto_ohlcv  # noqa: E402
 from ch04_backtest.strategy import dual_ma_weights  # noqa: E402
 from common import config  # noqa: E402
+from common.exchange import api_key_name  # noqa: E402
 from common.notify import send_text  # noqa: E402
 from common.state import load_state, save_state  # noqa: E402
 
@@ -105,7 +106,8 @@ def min_notional(exchange, symbol: str) -> float:
         market = exchange.market(symbol)
         cost = ((market.get("limits") or {}).get("cost") or {}).get("min")
         return float(cost) if cost else 5.0
-    except Exception:
+    except Exception as exc:
+        print(f"[警告] 读取 {getattr(exchange, 'id', '?')} 最小下单额失败（{exc}），按保守默认 5 USDT 处理")
         return 5.0
 
 
@@ -116,7 +118,8 @@ def total_base_balance(exchange, symbol: str) -> float:
         balance = exchange.fetch_balance()
         entry = balance.get(base) or {}
         return float(entry.get("free") or 0.0) + float(entry.get("used") or 0.0)
-    except Exception:
+    except Exception as exc:
+        print(f"[警告] 读取 {base} 全仓余额失败（{exc}），本轮对账按 0 处理")
         return 0.0
 
 
@@ -327,9 +330,7 @@ def main() -> None:
 
     exchange, sandbox = make_exchange()
     # 缺密钥判断要跟所配交易所对上（EXCHANGE_ID=okx 时看 OKX 的 key，不是币安的）
-    key_name = {"binance": "BINANCE_API_KEY", "okx": "OKX_API_KEY"}.get(
-        config.exchange_id(), "BINANCE_API_KEY")
-    has_keys = bool(config.get(key_name))
+    has_keys = bool(config.get(api_key_name(config.exchange_id())))
     order_enabled, mode = resolve_mode(args.live, args.real, sandbox, has_keys)
 
     logger.info(f"当前模式: {mode}" + (f" | 止损: {args.stop_loss:.0%}" if args.stop_loss else ""))

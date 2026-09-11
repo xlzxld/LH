@@ -38,7 +38,8 @@ def judge_verdict(in_ret: float, out_ret: float, out_trades: int) -> list[str]:
 
     返回判定消息列表，每条对应一个结论。判定规则：
       * 样本外交易次数 < 5 → 结果没有统计意义
-      * 样本外收益 >= 0 → 通过第一道关；否则 → 过拟合，不能上实盘
+      * 样本外收益 >= 0 → 通过第一道关；样本内赚而样本外亏 → 过拟合；
+        样本内也亏 → 不是过拟合，是策略本身无效。两者都不能上实盘
       * 样本内外收益差距 > 20 个百分点 → 策略在"过期"
     """
     msgs: list[str] = []
@@ -46,8 +47,10 @@ def judge_verdict(in_ret: float, out_ret: float, out_trades: int) -> list[str]:
         msgs.append("⚠️ 样本外交易次数太少（<5），结果没有统计意义，建议把 --split 调小、留更多样本外。")
     if out_ret >= 0:
         msgs.append("✅ 样本外仍为正收益，策略通过了第一道关。")
-    else:
+    elif in_ret > 0:
         msgs.append("❌ 样本外亏损。样本内赚钱、样本外亏钱 = 典型过拟合，这个参数不能上实盘。")
+    else:
+        msgs.append("❌ 样本外亏损（样本内也没赚钱——不是过拟合，是策略本身无效），不能上实盘。")
     if abs(out_ret - in_ret) > 0.20:
         msgs.append("⚠️ 样本内外的收益差距超过 20 个百分点，策略在'过期'，需警惕。")
     return msgs

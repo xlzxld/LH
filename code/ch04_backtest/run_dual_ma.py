@@ -12,6 +12,10 @@
     python code/ch04_backtest/run_dual_ma.py --crypto BTC/USDT --timeframe 1d
     python code/ch04_backtest/run_dual_ma.py --execute-on close     # 体验"未来函数"的乐观偏差
     python code/ch04_backtest/run_dual_ma.py --stop-loss 0.05       # 加 5% 止损（见第 8 章）
+    python code/ch04_backtest/run_dual_ma.py --astock 000001 --stamp-duty 0.0005
+                                                    # 跑A股个股：卖出印花税别漏（ETF/币安免税不用加）
+    python code/ch04_backtest/run_dual_ma.py --csv data/sample_prices.csv --no-plot
+                                                    # 完全离线：先跑 code/ch03_data/make_sample_data.py
 """
 from __future__ import annotations
 
@@ -51,10 +55,30 @@ def crypto_periods(timeframe: str) -> int:
     return periods
 
 
+def _load_local_csv(path: str) -> pd.DataFrame:
+    """
+    读取本地 CSV 离线回测（--csv 参数）：首列/date 列解析为日期索引。
+    缺文件、缺列都在第一时间给中文友好报错，而不是让新手面对 pandas 裸异常。
+    """
+    csv_path = Path(path)
+    if not csv_path.exists():
+        raise FileNotFoundError(
+            f"找不到 CSV 文件: {csv_path}"
+            "（想离线体验可先运行 python code/ch03_data/make_sample_data.py 生成样例数据）")
+    df = pd.read_csv(csv_path, encoding="utf-8-sig", index_col=0, parse_dates=True)
+    missing = {"open", "close"} - set(df.columns)
+    if missing:
+        raise ValueError(f"CSV 缺少列: {sorted(missing)}，实际列: {list(df.columns)}"
+                         "（离线回测至少需要 open/close 两列，日期放在第一列）")
+    df.index.name = "date"
+    return df
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="双均线策略回测")
     parser.add_argument("--astock", default="510300", help="A股/ETF代码")
     parser.add_argument("--crypto", help="改用加密货币，如 BTC/USDT")
+    parser.add_argument("--csv", help="离线数据源：本地CSV路径（优先级最高，提供后跳过网络）")
     parser.add_argument("--timeframe", default="1d")
     parser.add_argument("--start", default="20180101")
     parser.add_argument("--end", default="20500101")
@@ -65,6 +89,8 @@ def main() -> None:
     parser.add_argument("--commission", type=float, default=cfg.get_float("COMMISSION_RATE", 2.5e-4),
                         help="单边手续费率（默认读 .env 的 COMMISSION_RATE）")
     parser.add_argument("--min-fee", type=float, default=0.0, help="每笔最低佣金（A股券商约5元）")
+    parser.add_argument("--stamp-duty", type=float, default=0.0,
+                        help="卖出印花税率：A股个股 0.0005；ETF/加密货币免收保持 0")
     parser.add_argument("--slippage", type=float, default=cfg.get_float("SLIPPAGE_RATE", 5e-4),
                         help="单边滑点率（默认读 .env 的 SLIPPAGE_RATE）")
     parser.add_argument("--stop-loss", type=float, default=None,
@@ -75,16 +101,22 @@ def main() -> None:
 
     # ---- 1. 取数据
     periods = None  # 交给引擎按日历自动推断（含周末→365，A股→252）
-    if args.crypto:
+    if args.csv:
+        df = _load_local_csv(args.csv)
+        name = Path(args.csv).stem
+        source = "本地CSV"
+    elif args.crypto:
         df = datasource.fetch_crypto_ohlcv(args.crypto, timeframe=args.timeframe, limit=1000)
         name = args.crypto.replace("/", "")  # 斜杠不能出现在文件名里
         if len(df) > 1:  # 最后一根K线尚未收盘，拿它算信号就是"未来函数"——剔掉
             df = df.iloc[:-1]
         periods = crypto_periods(args.timeframe)
+        source = f"{args.crypto}"
     else:
         df = datasource.fetch_daily_with_cache(args.astock, start=args.start, end=args.end)
         name = args.astock
-    print(f"\n[数据] {name}: {df.index[0].date()} ~ {df.index[-1].date()}，共 {len(df)} 根K线"
+        source = f"东财接口 {name}"
+    print(f"\n[数据] {source}: {df.index[0].date()} ~ {df.index[-1].date()}，共 {len(df)} 根K线"
           + ("（已剔除最后一根未收盘K线）" if args.crypto else ""))
 
     # ---- 2. 生成信号
@@ -96,6 +128,7 @@ def main() -> None:
         initial_cash=args.cash,
         commission_rate=args.commission,
         min_fee=args.min_fee,
+        stamp_duty_rate=args.stamp_duty,
         slippage_rate=args.slippage,
         execute_on=args.execute_on,
         stop_loss_pct=args.stop_loss,
@@ -129,5 +162,7 @@ if __name__ == "__main__":
         print("[下一步] ① 若是网络类报错：等 1~5 分钟再试（免费接口限流很常见），"
               "已下载过的数据会自动用本地缓存 data/*.csv")
         print("         ② 若提示缺少 xxx 模块：pip install -r requirements.txt")
-        print("         ③ 更多排查思路见 docs/13-常见问题FAQ与进阶路线.md")
+        print("         ③ 想完全离线体验：先运行 python code/ch03_data/make_sample_data.py，"
+              "再加 --csv data/sample_prices.csv")
+        print("         ④ 更多排查思路见 docs/13-常见问题FAQ与进阶路线.md")
         sys.exit(1)

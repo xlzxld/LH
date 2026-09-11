@@ -33,7 +33,7 @@ def max_drawdown(equity: pd.Series) -> tuple[float, pd.Timestamp | None, pd.Time
     """
     计算最大回撤。
 
-    返回 (最大回撤比例, 谷底日期, 峰值日期)。回撤 = (净值 - 历史最高净值) / 历史最高净值。
+    返回 (最大回撤比例, 峰值日期, 谷底日期)。回撤 = (净值 - 历史最高净值) / 历史最高净值。
     """
     if equity.empty:
         return 0.0, None, None

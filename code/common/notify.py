@@ -9,7 +9,7 @@
   2. pushplus  —— PushPlus（https://www.pushplus.plus）
        微信扫码登录 -> 复制 token -> 填进 .env 的 PUSHPLUS_TOKEN
        免费额度比 Server酱宽松，个人学习够用
-  3. wecom     —— 企业微信群机器人 Webhook（免费、无条数限制、最稳定）
+  3. wecom     —— 企业微信群机器人 Webhook（免费、无每日条数限制，限 20 条/分钟、最稳定）
        微信里建一个企业微信群（个人也能建）-> 群设置 -> 添加群机器人
        -> 复制 Webhook 地址 -> 填进 .env 的 WECOM_WEBHOOK
 

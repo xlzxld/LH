@@ -11,7 +11,9 @@
     NaN 表示"数据不足，维持现状不动"——不是清仓信号！
   * execute_on="close"      : 信号当根收盘价成交 —— 简单，但实盘做不到，偏乐观。
   * execute_on="next_open"  : 信号在【下一根开盘价】成交 —— 接近实盘，默认推荐。
-  * 成本模型：佣金比例 + 最低佣金（A股券商 5 元起收）+ 滑点比例。
+  * 成本模型：佣金比例 + 最低佣金（A股券商 5 元起收）+ 滑点比例；
+    A股个股另有卖出印花税（stamp_duty_rate，2023-09 起为万分之五，只扣卖出腿；
+    ETF/加密货币免印花税，保持默认 0）。
 
 止损语义（stop_loss_pct，与第 8 章配套，默认关闭）：
   * 触发：当日最低价 low 击穿 持仓均价*(1-止损比例)（盘中触发，无前视）。
@@ -71,6 +73,7 @@ def run_backtest(
     min_trade_pct: float = 0.005,
     with_benchmark: bool = True,
     min_fee: float = 0.0,
+    stamp_duty_rate: float = 0.0,
     stop_loss_pct: float | None = None,
     periods_per_year: int | None = None,
 ) -> BacktestResult:
@@ -89,6 +92,8 @@ def run_backtest(
         止损卖单不受此限制
     :param min_fee: 每笔最低佣金（A股券商常见 5 元）。会参与现金护栏计算；
         币安等加密交易所无最低佣金，保持 0
+    :param stamp_duty_rate: 卖出印花税比例，只对卖出金额收取（不参与最低佣金托底）。
+        A股个股 0.0005（2023-09 起税率）；ETF 与加密货币免收，保持默认 0
     :param stop_loss_pct: 止损比例（如 0.05 = 从持仓均价亏 5% 触发）。None=不启用。
         启用时数据必须包含 low 列（止损按当日最低价触发）
     :param periods_per_year: 一年的K线根数（年化用）。None=自动推断
@@ -163,13 +168,15 @@ def run_backtest(
                 return
             notional = sold * sell_price
             fee = _fee(notional)
-            cash += notional - fee
+            tax = notional * stamp_duty_rate  # 印花税只扣卖出腿，不参与最低佣金托底
+            cash += notional - fee - tax
             shares -= sold
             if shares <= 1e-12:  # 清仓：止损基准一并失效
                 shares, entry_price = 0.0, None
             trades.append({"date": when, "side": "SELL", "price": round(sell_price, 6),
                            "shares": round(sold, 6), "fee": round(fee, 2),
                            "notional": round(notional, 2),
+                           **({"tax": round(tax, 2)} if tax > 0 else {}),
                            **({"reason": "STOP"} if is_stop else {})})
 
     def _stop_hit(low: float) -> bool:

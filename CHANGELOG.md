@@ -29,7 +29,7 @@
 - docs: README 目录补术语表条目、scripts 说明与离线体验提示；TODOS ④ 标注
   样例 CSV 生成器已落地（剩 Colab 笔记本）
 
-### 零安装首日体验补齐 + 第五轮体检（2026-09-11，与上条同批发布）
+### 零安装首日体验补齐 + 第五、六轮体检（2026-09-11，与上条同批发布）
 
 #### 新增
 - feat(notebooks): 新增 `notebooks/ch04-dual-ma-quickstart.ipynb` —— 零安装体验笔记本：
@@ -44,11 +44,17 @@
 - fix(live_bot): 心跳取行情失败时把异常原因插值进推送文案（R-3.1）
 - chore(agents): 规范升 v2.1.2 —— 并入 R-1.4 大白话交流，并删除 §2 门禁退化为
   `[自动填充]` 的分叉副本 `AGENTS _gx.md`
+- fix(risk): 第六轮体检 H-08 —— 仓位计算器校验 `--equity` 必须为正；此前
+  `--equity 0/负数` 会在"占总资金比例"那行抛裸 `ZeroDivisionError`，与全项目
+  "中文友好报错"基调不符。新增 `code/tests/test_position_sizing.py`（该模块此前
+  零覆盖），并取证"修复前失败 / 修复后通过"
 
 #### 文档
 - docs: README 单元测试数量由"81 个"改为"80+ 个"（非易腐表述）；新增笔记本入口与
   目录条目；TODOS P2 #4 标注完成
 - docs(enforcement): 执法包 README 的 AGENTS.md 版本引用同步至 v2.1.2（规范升级的连带遗漏）
+- docs: 第六轮体检 H-06 —— README 首屏回测图改引用已纳入版本管理的 `docs/images/`
+  （原指向被 `.gitignore` 忽略的 `data/`，在 GitHub 上显示为裂图）
 
 ## [1.2.2] - 2026-09-08
 

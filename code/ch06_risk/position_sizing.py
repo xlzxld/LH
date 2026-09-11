@@ -82,6 +82,11 @@ def main() -> None:
     for attr, hint in need:
         if getattr(args, attr) is None:
             parser.error(f"方法 {args.method} 需要参数 {hint}")
+    # 总资金必须为正：否则最后算"占总资金比例"时会抛裸 ZeroDivisionError，
+    # 让新手看到一串看不懂的 traceback，而不是看得懂的中文提示
+    if args.equity <= 0:
+        parser.error(f"--equity 必须为正数（收到 {args.equity:g}）。"
+                     "它是账户总资金，例如 --equity 100000")
 
     if args.method == "fixed_amount":
         amount = fixed_amount(args.equity, args.per_trade)

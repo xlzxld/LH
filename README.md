@@ -89,7 +89,7 @@ python code/ch04_backtest/run_dual_ma.py
 ├── README.md                 ← 你在这里
 ├── requirements.txt          依赖清单
 ├── .env.example              配置模板（复制为 .env 后填写密钥）
-├── docs/                     📖 教程正文（13 章，按顺序读）
+├── docs/                     📖 教程正文（14 章，按顺序读）
 │   ├── 00-学习路线图与环境搭建.md
 │   ├── 01-Python零基础速成.md
 │   ├── 02-量化核心概念.md
@@ -103,7 +103,8 @@ python code/ch04_backtest/run_dual_ma.py
 │   ├── 10-A股监测与微信推送.md
 │   ├── 11-聚宽平台实战.md
 │   ├── 12-部署与运维.md
-│   └── 13-常见问题FAQ与进阶路线.md
+│   ├── 13-常见问题FAQ与进阶路线.md
+│   └── 附录-术语表.md             40 个术语的"人话版"词典
 ├── code/                     💻 全部可运行代码
 │   ├── common/               配置加载 / 微信推送 / 交易所工厂 / 状态
 │   ├── ch03_data/            数据获取（东方财富 / akshare / ccxt）
@@ -116,9 +117,13 @@ python code/ch04_backtest/run_dual_ma.py
 │   ├── research/             策略研究（第 6-7 章）：信号库 / 参数扫描 / 样本外验证
 │   └── tests/                pytest 单元测试
 ├── solutions/                📝 各章"动手环节"参考答案与讲解
-├── scripts/                  环境自检 / Docker / 定时任务示例
+├── scripts/                  环境自检 / verify_all 一键通关 / Docker / 定时任务示例
 └── data/                     运行时生成：CSV缓存、净值图、状态文件
 ```
+
+> 💡 **离线没数据 / 想快速自检？** `python code/ch03_data/make_sample_data.py` 生成固定种子样例数据，
+> 再 `python code/ch04_backtest/run_dual_ma.py --csv data/sample_prices.csv --no-plot` 即可离线回测；
+> `python scripts/verify_all.py` 一键验证"数据 → 单测 → 回测 → 产物"全链路可跑通。
 
 > 💡 **代码目录名 = 语义模块（不随章节号变），文档章节号 = 学习顺序**。例如 `code/ch04_backtest/`
 > 对应第 4 章，但 `code/ch06_risk/`（仓位计算器）对应第 8 章——目录名里的数字是"模块诞生时的
@@ -130,7 +135,7 @@ python code/ch04_backtest/run_dual_ma.py
 
 - **零基础友好**：每一章都有"学习目标 / 正文 / 动手环节 / 常见的坑"，Python 不熟也能跟上（第 1 章速成）
 - **代码即教材**：教学版自写回测引擎、逐行中文注释，不用黑盒框架，读懂数学
-- **真实且严谨**：无未来函数（信号次根开盘成交）、手续费 + 滑点建模、72 个单元测试护体
+- **真实且严谨**：无未来函数（信号次根开盘成交）、手续费 + 滑点建模、81 个单元测试护体
 - **大陆网络可用**：A 股走东方财富公开接口；币安公共行情走 `data-api.binance.vision` 直连；币安**测试网**可直连拿假钱练手
 - **安全阶梯**：dry-run（不下单）→ testnet（假钱）→ 实盘（三重确认），每一步都可回退
 - **微信触达**：Server酱 / PushPlus / 企业微信三选一，免费

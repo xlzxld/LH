@@ -217,3 +217,30 @@ def test_fractional_weights_lock_and_rearm():
     assert buys[0]["date"] == idx[1] and buys[1]["date"] == idx[7]
     # 锁仓期间(idx3~idx5，权重持续 0.3)绝不允许重新买入
     assert all(t["date"] not in (idx[3], idx[4], idx[5]) for t in buys)
+
+
+# ============================ 卖出印花税 stamp_duty_rate ============================
+
+def test_stamp_duty_charged_on_sell_leg_only():
+    """印花税只扣卖出腿、不参与最低佣金托底；买入流水不应出现 tax 字段。"""
+    df = make_df([100.0, 100.0, 100.0])
+    weights = pd.Series([1.0, 0.0, 0.0], index=df.index)
+    result = run_backtest(df, weights, initial_cash=100_000,
+                          commission_rate=0.0, slippage_rate=0.0,
+                          stamp_duty_rate=0.0005, execute_on="close", min_trade_pct=0.0)
+    assert len(result.trades) == 2
+    assert "tax" not in result.trades[0]                     # 买入不收印花税
+    assert result.trades[1]["tax"] == pytest.approx(50.0)    # 卖出 10 万 × 0.0005
+    assert result.equity.iloc[-1] == pytest.approx(100_000 - 50.0)
+
+
+def test_stamp_duty_default_zero_backward_compat():
+    """不传 stamp_duty_rate 与显式传 0.0 的结果必须完全一致（既有调用零影响）。"""
+    df = make_df([100.0, 105.0, 95.0, 110.0])
+    weights = pd.Series([1.0, 1.0, 0.0, 0.0], index=df.index)
+    common = dict(initial_cash=100_000, commission_rate=0.001, slippage_rate=0.001,
+                  execute_on="close", min_trade_pct=0.0)
+    implicit = run_backtest(df, weights, **common)
+    explicit = run_backtest(df, weights, stamp_duty_rate=0.0, **common)
+    assert implicit.trades == explicit.trades
+    pd.testing.assert_series_equal(implicit.equity, explicit.equity)

@@ -297,8 +297,8 @@ def maybe_heartbeat(state: dict, exchange, symbol: str, mode: str, logger) -> No
     try:
         price = float(exchange.fetch_ticker(symbol)["last"])
         body = f"模式: {mode}\n{symbol} 最新价: {price:.2f}\n机器人持仓: {state.get('bot_base', 0.0)}"
-    except Exception:
-        body = f"模式: {mode}（行情获取失败，仅心跳）"
+    except Exception as exc:
+        body = f"模式: {mode}（行情获取失败，仅心跳：{exc}）"
     send_text("💓 机器人每日心跳", body)
 
 

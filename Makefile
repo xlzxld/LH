@@ -4,7 +4,10 @@
 # 增量格式检查（大仓推荐）：make verify CHANGED="$(git diff --name-only)"，仅对改动文件执行 fmt-check
 FMT_CHECK_CMD ?= skip
 LINT_CMD ?= skip
-TEST_CMD ?= python -m pytest code/tests/ -q
+# 本地优先用项目自带的 .venv（系统 python 常缺依赖）；CI 会显式覆盖此变量
+PY ?= $(shell if [ -x .venv/Scripts/python.exe ]; then echo .venv/Scripts/python.exe; \
+	elif [ -x .venv/bin/python ]; then echo .venv/bin/python; else echo python; fi)
+TEST_CMD ?= $(PY) -m pytest code/tests/ -q
 BUILD_CMD ?= skip
 CHANGED ?=
 

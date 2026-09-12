@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
 """2026-09-12 全面代码审查修复回归（M1/M2/M5/L1/L3/L4/L7/L8/L13）。
 
-命名保持与既有测试套件一致；涉及第三方网络/交易所的路径用 Fake 或源码
-断言（与 test_live_bot 里"读源码断言 CLI 接线"的风格一致）。
+2026-09-13 第二轮全面审查修复回归见文件末尾 S1~S4/M2 段：
+dry-run 卖出守卫、ccxt 沙箱属性名、买入单结果未知停机、close 模式 NaN、
+状态落盘。命名保持与既有测试套件一致；涉及第三方网络/交易所的路径用
+Fake 或源码断言（与 test_live_bot 里"读源码断言 CLI 接线"的风格一致）。
 """
 from __future__ import annotations
 
@@ -230,3 +232,163 @@ def test_run_once_records_pending_when_balance_snapshot_misses():
     else:
         # 正常成交分支: 账本应增加(两类行为都合法, 关键是不重复下单)
         assert state["bot_base"] > 0 or calls["buys"] == 1
+
+
+# ================================================================ 2026-09-13 第二轮审查修复回归
+
+# ---------------------------------------------------------------- S1 dry-run 卖出守卫
+
+DEATH = [100.0] * 8 + [90.0] * 5 + list(range(90, 50, -1))  # 尾部下行 -> 死叉
+
+
+class _FakeMarketExchange:
+    """S1/S3 用：实现 run_once 全链路所需的最小交易所接口。"""
+
+    def __init__(self, base_free=0.0):
+        self.orders = []
+        self._base_free = base_free
+
+    def fetch_ticker(self, symbol):
+        return {"last": 100.0}
+
+    def fetch_balance(self):
+        return {"BTC": {"free": self._base_free, "used": 0.0}}
+
+    def amount_to_precision(self, symbol, amount):
+        return float(f"{amount:.6f}")
+
+    def market(self, symbol):
+        return {"limits": {"cost": {"min": 5.0}}}
+
+    def create_market_buy_order(self, symbol, amount):
+        self.orders.append(("BUY", amount))
+        self._base_free += amount
+        return {"id": "b1"}
+
+    def create_market_sell_order(self, symbol, amount):
+        self.orders.append(("SELL", amount))
+        self._base_free = max(self._base_free - amount, 0.0)
+        return {"id": "s1"}
+
+
+def _make_closes(closes):
+    idx = pd.date_range("2024-01-01", periods=len(closes), freq="h")
+    p = pd.Series(closes, index=idx)
+    return pd.DataFrame({"open": p, "high": p, "low": p, "close": p, "volume": 1.0})
+
+
+def test_run_once_dry_run_never_sells(monkeypatch):
+    """S1: dry-run 死叉卖出曾直接市价卖出（买入/止损都有模拟分支，卖出漏了）。
+    文件头承诺"不加 --live 一张单都不会发"——卖出方向同样必须成立。"""
+    monkeypatch.setattr(live_bot, "fetch_crypto_ohlcv",
+                        lambda *a, **k: _make_closes(DEATH))
+    monkeypatch.setattr(live_bot.time, "sleep", lambda *_: None)
+    ex = _FakeMarketExchange(base_free=1.0)
+    state = {"bot_base": 1.0, "entry_price": 100.0}
+    live_bot.run_once(ex, "BTC/USDT", "1h", 3, 5, 100.0, False, state, {},
+                      _quiet_logger())
+    assert ex.orders == [], "dry-run 下死叉信号发出了真实卖单！"
+
+
+# ---------------------------------------------------------------- S2 ccxt 沙箱属性名
+
+def test_sandbox_active_reads_real_ccxt_flag():
+    """S2: sandbox_active 曾读 .sandbox（ccxt 4.x 实例上不存在）恒 False——
+    测试网被当真账户拒绝下单、模式横幅语义反转。用真实 ccxt 实例回归
+    （set_sandbox_mode 只改本地 URL，不发网络请求）。"""
+    ccxt = pytest.importorskip("ccxt")
+    from common.exchange import sandbox_active
+
+    ex = ccxt.binance()
+    assert sandbox_active(ex) is False
+    ex.set_sandbox_mode(True)
+    assert sandbox_active(ex) is True
+
+
+# ---------------------------------------------------------------- S3 买入单结果未知
+
+class _BuyTimeoutExchange(_FakeMarketExchange):
+    """下单调用本身抛网络异常（订单可能已到达交易所）。"""
+
+    def create_market_buy_order(self, symbol, amount):
+        self.orders.append(("BUY-ATTEMPT", amount))
+        raise RuntimeError("simulated request timeout after order reached exchange")
+
+
+def test_buy_call_failure_raises_ambiguous_and_saves_state(monkeypatch):
+    """S3: 下单调用抛异常时绝不能当瞬时错误下一轮重试（会重复市价买入）。
+    必须：抛 BuyOrderAmbiguous 让主循环停机 + 状态落盘。"""
+    monkeypatch.setattr(live_bot, "fetch_crypto_ohlcv",
+                        lambda *a, **k: _make_closes(
+                            [100.0] * 8 + [50.0] * 5 + list(range(50, 90))))
+    monkeypatch.setattr(live_bot.time, "sleep", lambda *_: None)
+    ex = _BuyTimeoutExchange()
+    state = {"armed": True, "prev_target": 0.0, "bot_base": 0.0, "entry_price": None}
+    with pytest.raises(live_bot.BuyOrderAmbiguous):
+        live_bot.run_once(ex, "BTC/USDT", "1h", 3, 5, 100.0, True, state, {},
+                          _quiet_logger())
+    # 状态已落盘（停机后人工核对的是磁盘上的账本）
+    import json
+    on_disk = json.loads(live_bot.STATE_FILE.read_text(encoding="utf-8"))
+    assert on_disk == state
+
+
+class _SnapshotFailExchange(_FakeMarketExchange):
+    """下单成功，但之后的余额快照抛网络异常。"""
+
+    def __init__(self):
+        super().__init__()
+        self._calls = 0
+
+    def fetch_balance(self):
+        self._calls += 1
+        if self._calls >= 3:  # before=1, after=3（对账 total=2 不走 balance 计数以外的路径）
+            raise RuntimeError("simulated snapshot timeout")
+        return {"BTC": {"free": self._base_free, "used": 0.0}}
+
+
+def test_snapshot_failure_pends_order_and_reraises(monkeypatch):
+    """S3b: 单已提交（有订单号）但余额快照失败 → 挂起 pending_buy 再把异常
+    交回主循环（下一轮会先核实订单，不会重复买入）。"""
+    monkeypatch.setattr(live_bot, "fetch_crypto_ohlcv",
+                        lambda *a, **k: _make_closes(
+                            [100.0] * 8 + [50.0] * 5 + list(range(50, 90))))
+    monkeypatch.setattr(live_bot.time, "sleep", lambda *_: None)
+    ex = _SnapshotFailExchange()
+    state = {"armed": True, "prev_target": 0.0, "bot_base": 0.0, "entry_price": None}
+    with pytest.raises(RuntimeError):
+        live_bot.run_once(ex, "BTC/USDT", "1h", 3, 5, 100.0, True, state, {},
+                          _quiet_logger())
+    assert state["pending_buy"]["order_id"] == "b1"
+
+
+# ---------------------------------------------------------------- S4 close 模式 NaN
+
+def test_close_mode_nan_weights_do_not_crash():
+    """S4: close 模式遇 NaN 信号（均线窗口未就绪的前几根必为 NaN）曾把
+    None 传进 _execute 直接 TypeError——文档推荐入口 100% 必崩。"""
+    idx = pd.date_range("2024-01-01", periods=8, freq="D")
+    df = pd.DataFrame({"open": [10.0] * 8, "close": [10.0] * 8,
+                       "high": [10.0] * 8, "low": [10.0] * 8}, index=idx)
+    weights = pd.Series([float("nan")] * 4 + [1.0, 1.0, 0.0, 0.0], index=idx)
+    r = run_backtest(df, weights, execute_on="close", with_benchmark=False)
+    assert len(r.equity) == 8
+    # NaN 段"维持现状"不崩不清仓；之后的 1.0/0.0 正常买卖
+    assert {t["side"] for t in r.trades} == {"BUY", "SELL"}
+
+
+# ---------------------------------------------------------------- M2 补记账落盘
+
+def test_reconcile_pending_buy_persists_cooldown(monkeypatch):
+    """M2: 核实失败时 rounds_left 递减必须落盘——否则反复重启的进程
+    永远耗不尽冷却轮数、挂起永远解除不了。"""
+    import json
+
+    state = {"bot_base": 0.0, "entry_price": None,
+             "pending_buy": {"order_id": "780", "rounds_left": 3}}
+    ex = _FakePendingExchange(error=RuntimeError("network down"))
+    ok = live_bot._reconcile_pending_buy(ex, "BTC/USDT", state, 190.0,
+                                         _quiet_logger())
+    assert ok is False
+    on_disk = json.loads(live_bot.STATE_FILE.read_text(encoding="utf-8"))
+    assert on_disk["pending_buy"]["rounds_left"] == 2

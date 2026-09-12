@@ -33,6 +33,7 @@ def _get_with_retry(url: str, params: dict, tries: int = 3, backoff: float = 1.5
     """
     带重试的 GET：免费接口偶发断连/限流是常态，工程上永远要有重试。
     每次失败等待时间翻倍（1.5s -> 3s -> 6s），三次都失败才抛异常。
+    4xx 客户端错误（参数/权限问题，429 限流除外）重试也不会好，立即失败。
     """
     import time as _time
 
@@ -42,12 +43,18 @@ def _get_with_retry(url: str, params: dict, tries: int = 3, backoff: float = 1.5
             resp = requests.get(url, params=params, headers=UA, timeout=TIMEOUT)
             resp.raise_for_status()
             return resp.json()
+        except requests.HTTPError as exc:
+            status = getattr(exc.response, "status_code", None)
+            if status is not None and 400 <= status < 500 and status != 429:
+                raise RuntimeError(f"请求 {url} 被拒绝（HTTP {status}），请检查参数/权限"
+                                   "（客户端错误不重试）") from exc
+            last_exc = exc
         except Exception as exc:
             last_exc = exc
-            if attempt < tries:
-                wait = backoff * (2 ** (attempt - 1))
-                print(f"[重试] 请求失败（第{attempt}次）：{exc}，{wait:.0f}s 后重试…")
-                _time.sleep(wait)
+        if attempt < tries:
+            wait = backoff * (2 ** (attempt - 1))
+            print(f"[重试] 请求失败（第{attempt}次）：{last_exc}，{wait:.0f}s 后重试…")
+            _time.sleep(wait)
     raise RuntimeError(f"请求 {url} 连续 {tries} 次失败") from last_exc
 
 

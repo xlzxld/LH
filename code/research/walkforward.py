@@ -77,6 +77,7 @@ def main() -> None:
     print(f"验证参数: MA{args.fast}xMA{args.slow}\n")
 
     r_in = run_backtest(in_df, dual_ma_weights(in_df, args.fast, args.slow), with_benchmark=False)
+    print(f"[提示] 样本外前 {args.slow - 1} 根用于均线预热（无信号），样本外有效覆盖相应缩短")
     r_out = run_backtest(out_df, dual_ma_weights(out_df, args.fast, args.slow), with_benchmark=False)
 
     print(f"样本内（练习册）: {_fmt_stats(r_in.stats)}")

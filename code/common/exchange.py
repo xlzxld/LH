@@ -79,5 +79,13 @@ def api_key_name(ex_id: str | None = None) -> str:
 
 def sandbox_active(exchange) -> bool:
     """读交易所实例的真实沙箱态（binance 用了 set_sandbox_mode 时为 True）。
-    下单开关必须以这里的结果为准，不要读配置旗标（见 live_bot.resolve_mode）。"""
-    return bool(getattr(exchange, "sandbox", False))
+    下单开关必须以这里的结果为准，不要读配置旗标（见 live_bot.resolve_mode）。
+
+    属性名勘误（2026-09-13 实测 ccxt 4.5.77）：set_sandbox_mode(True) 后实例上
+    存在的是布尔属性 isSandboxModeEnabled；早期版本曾用 .sandbox —— 读错属性
+    会恒返回 False，测试网被当成真账户、真账户模式横幅语义反转。
+    """
+    val = getattr(exchange, "isSandboxModeEnabled", None)
+    if val is None:
+        val = getattr(exchange, "sandbox", False)  # 老版本 ccxt 兜底
+    return bool(val)

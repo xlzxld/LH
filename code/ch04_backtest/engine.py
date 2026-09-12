@@ -87,7 +87,9 @@ def run_backtest(
     :param commission_rate: 佣金/手续费比例（单向）。A股ETF约 0.01%~0.03%，
         币安现货普通用户 0.1%
     :param slippage_rate: 滑点比例（买入成交价 = 信号价*(1+滑点)，卖出反之）
-    :param execute_on: "close"（当根收盘成交）或 "next_open"（次根开盘成交，推荐）
+    :param execute_on: "close"（当根收盘成交）或 "next_open"（次根开盘成交，推荐）。
+        next_open 的已知边界：最后一根K线收盘产生的信号/止损没有"下一根开盘"可成交，
+        会被静默丢弃（对长回测影响可忽略，但短样本尾部要留意）
     :param min_trade_pct: 调仓金额低于总权益的这个比例就忽略（避免碎单）；
         止损卖单不受此限制
     :param min_fee: 每笔最低佣金（A股券商常见 5 元）。会参与现金护栏计算；
@@ -240,6 +242,8 @@ def run_backtest(
                 if prev_w is not None and prev_w <= 0:
                     armed = True
                     _execute(w, float(row["close"]), when)
+            elif w is None:
+                pass  # NaN=数据不足维持现状——此前会把 None 传进 _execute 直接 TypeError
             else:
                 _execute(w, float(row["close"]), when)
             equity_values.append(_equity(float(row["close"])))  # 成交后记账（含费用）

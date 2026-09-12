@@ -47,6 +47,14 @@ VALID_TIMEFRAMES = {"1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "8h"
 REAL_MONEY_PHRASE = "I-ACCEPT-FULL-LEGAL-RESPONSIBILITY"
 
 
+class BuyOrderAmbiguous(RuntimeError):
+    """买入单提交后结果未知（如下单调用网络超时）——订单可能已成交也可能没有。
+
+    此时账本未记、状态未存，若按"瞬时错误下一轮重试"处理会再次市价买入
+    （重复建仓=超买）。必须停机等人工核对交易所订单后再重启。
+    """
+
+
 def setup_logging() -> logging.Logger:
     config.ensure_dirs()
     logging.basicConfig(
@@ -137,6 +145,8 @@ def _reconcile_pending_buy(exchange, symbol: str, state: dict, price: float,
     核实逻辑：fetch_order 看订单状态——
       已成交/已终结 → 按 filled 补记账(成交均价估算成本)并解除挂起;
       仍在挂单/查询失败 → 冷却等待(超过 rounds_left 轮强制解除, 防永久卡死)。
+    注意：函数内每次修改 state 后立即落盘——否则补记账/冷却递减只存在于内存，
+    反复重启的进程永远耗不尽 rounds_left、挂起也永远解除不了。
     """
     pend = state.get("pending_buy")
     if not isinstance(pend, dict):
@@ -144,6 +154,7 @@ def _reconcile_pending_buy(exchange, symbol: str, state: dict, price: float,
     oid = str(pend.get("order_id") or "")
     if not oid:
         state["pending_buy"] = None
+        save_state(STATE_FILE, state)
         return True
     try:
         o = exchange.fetch_order(oid, symbol)
@@ -152,10 +163,12 @@ def _reconcile_pending_buy(exchange, symbol: str, state: dict, price: float,
         left = int(pend.get("rounds_left", 0) or 0) - 1
         if left <= 0:
             state["pending_buy"] = None
+            save_state(STATE_FILE, state)
             logger.warning(f"买入单 {oid} 状态核实持续失败({exc})，冷却轮数已用完，"
                            f"解除买入挂起。请人工核对账本与账户余额是否一致！")
             return True
         pend["rounds_left"] = left
+        save_state(STATE_FILE, state)
         logger.warning(f"核实买入单 {oid} 状态失败({exc})，本轮暂停买入"
                        f"（剩余冷却 {left} 轮）")
         return False
@@ -179,6 +192,7 @@ def _reconcile_pending_buy(exchange, symbol: str, state: dict, price: float,
         else:
             logger.info(f"挂起买入单 {oid} 状态={status}，未成交，解除买入挂起")
         state["pending_buy"] = None
+        save_state(STATE_FILE, state)
         return True
     # 仍在挂单中
     logger.info(f"上一笔买入单 {oid} 尚未完结(状态={status})，本轮暂停买入防重复建仓")
@@ -195,6 +209,9 @@ def run_once(exchange, symbol: str, timeframe: str, fast: int, slow: int,
     stop_loss_pct：止损比例（如 0.05 = 从持仓均价亏 5% 触发市价卖出）。None=不启用。
     这是第 8 章风控在实盘侧的落地：回测引擎有止损（engine.stop_loss_pct），
     实盘机器人此前一直缺这一道，导致"回测带止损、实盘裸奔"的语义裂痕。
+    已知语义差异（工程取舍）：回测按当日 low 触发（无前视），实盘按轮询时的
+    ticker 实时价触发——盘中插针在轮询间隔内反弹会漏触发（60s 轮询下的
+    盲区），属可接受近似，不是 bug。
     """
     df = fetch_crypto_ohlcv(symbol, timeframe=timeframe, limit=slow + 10, exchange=exchange)
     if len(df) < 2:
@@ -291,15 +308,54 @@ def run_once(exchange, symbol: str, timeframe: str, fast: int, slow: int,
             return  # 有买入单未核实完结：本轮禁止再下单（防重复建仓）
         spend = quote_per_trade * float(target)  # 分数目标按比例缩放投入
         amount = spend / price
+        min_cost = min_notional(exchange, symbol)
+        if spend < min_cost:
+            # 卖出方向有灰尘检查，买入方向同样要预检：金额低于最小下单额时
+            # dry-run 全然不觉、--live 首单即 InvalidOrder 停机
+            logger.error(f"买入金额 {spend:.2f} USDT 低于交易所最小下单额 {min_cost:.2f}"
+                         f"（请调大 QUOTE_PER_TRADE 或换交易对），本轮跳过")
+            return
         if not order_enabled:
             logger.info(f"[模拟] 将市价买入 {amount:.6f} {base}（约 {spend:.0f} USDT）")
             return
         # 余额差值记账：买入前后各拍一次可用余额快照，差额=实际到手（自动消化
         # 部分成交和"手续费以基础币收取"两类偏差，比信订单名义数量可靠）
         before = get_free_balance(exchange, symbol)
-        order = exchange.create_market_buy_order(symbol, exchange.amount_to_precision(symbol, amount))
-        time.sleep(2)  # 给成交与余额结算留一点时间
-        after = get_free_balance(exchange, symbol)
+        try:
+            order = exchange.create_market_buy_order(symbol, exchange.amount_to_precision(symbol, amount))
+        except Exception as exc:
+            # 下单调用本身抛异常 = 结果未知：订单可能已到达交易所并成交。此时
+            # 账本未记，若让主循环按"瞬时错误"下一轮重试，会再次市价买入
+            # （重复建仓=真金白银超买）。先按余额快照尽力补账，再停机叫人。
+            logger.error(f"买入单提交时发生异常（{type(exc).__name__}: {exc}），订单结果未知")
+            try:
+                time.sleep(2)
+                got_amb = max(get_free_balance(exchange, symbol) - before, 0.0)
+            except Exception:
+                got_amb = 0.0
+            if got_amb > 0:
+                new_base = bot_holding + got_amb
+                state["entry_price"] = (float(entry_price or 0.0) * bot_holding
+                                        + amount * price) / new_base
+                state["bot_base"] = round(new_base, 8)
+                logger.warning(f"余额快照显示实际入账 {got_amb:.6f} {base}，已补记账")
+            save_state(STATE_FILE, state)
+            raise BuyOrderAmbiguous(
+                "买入单结果未知，已按余额快照尽力补账并停机。"
+                "请到交易所核对订单成交情况、修正 data/state/live_bot_state.json 后再重启") from exc
+        try:
+            time.sleep(2)  # 给成交与余额结算留一点时间
+            after = get_free_balance(exchange, symbol)
+        except Exception:
+            # 单已提交（有订单号），只是余额快照没拍到：挂起待核实。
+            # 下一轮 _reconcile_pending_buy 会先核实订单状态，不会重复买入。
+            state["pending_buy"] = {
+                "order_id": str(order.get("id") or ""),
+                "rounds_left": 3,
+            }
+            save_state(STATE_FILE, state)
+            logger.warning("买入单已提交但余额快照失败，已挂起自动买入，下轮先核实订单")
+            raise  # 网络瞬时异常交主循环重试（重入会被 pending_buy 拦住）
         got = max(after - before, 0.0)
         if got <= 0:
             # 单已提交却读不到余额变化：宁可少记不能多记（多记会让止损线失真、
@@ -314,10 +370,12 @@ def run_once(exchange, symbol: str, timeframe: str, fast: int, slow: int,
             save_state(STATE_FILE, state)
             return
         new_base = bot_holding + got
-        # 持仓均价用"实际花费加权"（金额×现价≈真实支出），供止损判断；不能用
-        # 名义 quote_per_trade——分数仓位时那会高估成本、让止损线提前触发
+        # 持仓均价用"实际花费加权"：优先订单回报的成交均价（真实成交，含滑点），
+        # 拿不到再用当前 ticker 价兜底；不能用名义 quote_per_trade——分数仓位时
+        # 那会高估成本、让止损线提前触发
+        fill_price = float(order.get("average") or order.get("price") or price)
         old_cost = float(entry_price or 0.0) * bot_holding
-        state["entry_price"] = (old_cost + amount * price) / new_base
+        state["entry_price"] = (old_cost + got * fill_price) / new_base
         state["bot_base"] = round(new_base, 8)
         save_state(STATE_FILE, state)
         logger.info(f"[成交] 买入单 id={order.get('id')}，实际入账 {got:.6f} {base}")
@@ -330,6 +388,14 @@ def run_once(exchange, symbol: str, timeframe: str, fast: int, slow: int,
             # 低于交易所最小下单额的灰尘永远卖不掉——重试只会死循环。标记关账，留下零头
             logger.warning(f"机器人持仓市值 {sell_amount * price:.2f} USDT 低于交易所最小下单额，"
                            f"按灰尘弃置并清零账本（零头留在账户里）")
+            state["bot_base"] = 0.0
+            state["entry_price"] = None
+            save_state(STATE_FILE, state)
+            return
+        if not order_enabled:
+            # dry-run 守卫：买入/止损分支都有模拟分支，卖出漏了会真实下单
+            # （历史缺陷 S1：状态文件有持仓时 dry-run 死叉信号曾真实市价卖出）
+            logger.info(f"[模拟] 将市价卖出 {sell_amount:.6f} {base}（约 {sell_amount * price:.0f} USDT）")
             state["bot_base"] = 0.0
             state["entry_price"] = None
             save_state(STATE_FILE, state)
@@ -434,6 +500,13 @@ def main() -> None:
         except Exception as exc:
             # 错误分诊（Eng M9）：永久性错误重试没有意义，必须停下来叫人。
             # 用 isinstance 而非异常类名字符串——子类能命中，ccxt 改名也不会静默失效
+            if isinstance(exc, BuyOrderAmbiguous):
+                # 买入单结果未知（可能已成交）：重试=重复建仓，必须停机人工核对
+                logger.error(f"停机等待人工核对：{exc}")
+                send_text("🛑 机器人停机",
+                          f"{type(exc).__name__}：买入单结果未知，请到交易所核对订单"
+                          "并修正状态文件后重启")
+                break
             if isinstance(exc, (ccxt.AuthenticationError, ccxt.PermissionDenied,
                                 ccxt.AccountSuspended)):
                 logger.error(f"致命错误：API Key 无效或无权限。停机。{exc}")

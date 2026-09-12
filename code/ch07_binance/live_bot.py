@@ -35,7 +35,7 @@ from ch03_data.datasource import fetch_crypto_ohlcv  # noqa: E402
 from ch04_backtest.strategy import dual_ma_weights  # noqa: E402
 from common import config  # noqa: E402
 from common.exchange import api_key_name  # noqa: E402
-from common.notify import send_text  # noqa: E402
+from common.notify import ensure_utf8_stdio, send_text  # noqa: E402
 from common.state import load_state, save_state  # noqa: E402
 
 LOG_FILE = config.DATA_DIR / "live_bot.log"
@@ -75,6 +75,10 @@ def resolve_mode(live: bool, real: bool, sandbox_active: bool, has_keys: bool) -
     if not live:
         return False, "DRY-RUN（不发送任何订单）"
     if sandbox_active:
+        if not has_keys:
+            # 测试网同样需要 API Key: 曾漏检, 无 Key 加 --live 启动会打出
+            # "TESTNET 真实下单"横幅, 第一轮 fetch_balance 即 AuthenticationError 停机
+            return False, "TESTNET-缺密钥（无法交易）"
         return True, "TESTNET（测试网假钱，真实下单）"
     if not has_keys:
         return False, "LIVE-缺密钥（无法交易）"
@@ -121,6 +125,64 @@ def total_base_balance(exchange, symbol: str) -> float:
     except Exception as exc:
         print(f"[警告] 读取 {base} 全仓余额失败（{exc}），本轮对账按 0 处理")
         return 0.0
+
+
+def _reconcile_pending_buy(exchange, symbol: str, state: dict, price: float,
+                           logger) -> bool:
+    """核实上次"已提交但未确认到手"的买入单。返回 False = 本轮禁止再买入。
+
+    真钱防线：买入单提交后余额快照没读到变化时, 账本不更新, 但订单可能已
+    实际成交 —— 若不拦住, 下一轮 in_position 仍为 False, 会再次市价买入
+    （重复建仓=超买, 且止损均价只按第二笔算, 止损线失真）。
+    核实逻辑：fetch_order 看订单状态——
+      已成交/已终结 → 按 filled 补记账(成交均价估算成本)并解除挂起;
+      仍在挂单/查询失败 → 冷却等待(超过 rounds_left 轮强制解除, 防永久卡死)。
+    """
+    pend = state.get("pending_buy")
+    if not isinstance(pend, dict):
+        return True
+    oid = str(pend.get("order_id") or "")
+    if not oid:
+        state["pending_buy"] = None
+        return True
+    try:
+        o = exchange.fetch_order(oid, symbol)
+        status = str((o or {}).get("status") or "")
+    except Exception as exc:
+        left = int(pend.get("rounds_left", 0) or 0) - 1
+        if left <= 0:
+            state["pending_buy"] = None
+            logger.warning(f"买入单 {oid} 状态核实持续失败({exc})，冷却轮数已用完，"
+                           f"解除买入挂起。请人工核对账本与账户余额是否一致！")
+            return True
+        pend["rounds_left"] = left
+        logger.warning(f"核实买入单 {oid} 状态失败({exc})，本轮暂停买入"
+                       f"（剩余冷却 {left} 轮）")
+        return False
+    if status in ("closed", "canceled", "expired", "rejected"):
+        filled = 0.0
+        avg = price
+        try:
+            filled = float((o or {}).get("filled") or 0.0)
+            avg = float((o or {}).get("average") or (o or {}).get("price") or price)
+        except (TypeError, ValueError):
+            pass
+        if status == "closed" and filled > 0:
+            # 按实际成交补记账：账本 += filled, 均价按订单成交均价加权
+            old_base = float(state.get("bot_base") or 0.0)
+            old_cost = float(state.get("entry_price") or 0.0) * old_base
+            new_base = old_base + filled
+            state["bot_base"] = round(new_base, 8)
+            state["entry_price"] = (old_cost + filled * avg) / new_base
+            logger.warning(f"挂起买入单 {oid} 已成交 {filled:.6f}，已按订单数据"
+                           f"补记账（均价 {avg:.2f}）。请人工复核账本")
+        else:
+            logger.info(f"挂起买入单 {oid} 状态={status}，未成交，解除买入挂起")
+        state["pending_buy"] = None
+        return True
+    # 仍在挂单中
+    logger.info(f"上一笔买入单 {oid} 尚未完结(状态={status})，本轮暂停买入防重复建仓")
+    return False
 
 
 # ---------------------------------------------------------------- 单轮逻辑
@@ -225,6 +287,8 @@ def run_once(exchange, symbol: str, timeframe: str, fast: int, slow: int,
         if not state.get("armed", True):  # 止损后锁仓：等新的跳变才放行
             logger.info(f"{symbol} 止损后锁仓中，等待新的金叉跳变才重新入场")
             return
+        if order_enabled and not _reconcile_pending_buy(exchange, symbol, state, price, logger):
+            return  # 有买入单未核实完结：本轮禁止再下单（防重复建仓）
         spend = quote_per_trade * float(target)  # 分数目标按比例缩放投入
         amount = spend / price
         if not order_enabled:
@@ -239,8 +303,14 @@ def run_once(exchange, symbol: str, timeframe: str, fast: int, slow: int,
         got = max(after - before, 0.0)
         if got <= 0:
             # 单已提交却读不到余额变化：宁可少记不能多记（多记会让止损线失真、
-            # 卖出超额），下轮对账告警会兜底提示
-            logger.warning("买入单已提交但未读到余额变化，账本本轮不更新（下轮对账会提示）")
+            # 卖出超额）。记入待核实单并冷却 —— 若不拦住，下轮 in_position 仍为
+            # False 会再次市价买入（第一单可能已实际成交 = 真金白银超买）。
+            state["pending_buy"] = {
+                "order_id": str(order.get("id") or ""),
+                "rounds_left": 3,
+            }
+            logger.warning("买入单已提交但未读到余额变化，账本本轮不更新；"
+                           "已挂起自动买入，下轮先核实订单成交状态再决定是否补记账")
             save_state(STATE_FILE, state)
             return
         new_base = bot_holding + got
@@ -303,6 +373,7 @@ def maybe_heartbeat(state: dict, exchange, symbol: str, mode: str, logger) -> No
 
 
 def main() -> None:
+    ensure_utf8_stdio()  # 日志/横幅含 emoji：Windows GBK 控制台需先切 UTF-8 输出
     parser = argparse.ArgumentParser(description="币安双均线实盘机器人")
     parser.add_argument("--symbol", default="BTC/USDT")
     parser.add_argument("--timeframe", default="1h", help="信号K线周期: 15m/1h/4h/1d")

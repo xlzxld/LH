@@ -54,7 +54,10 @@ def main() -> None:
     fasts = _parse_ints(args.fast)
     slows = _parse_ints(args.slow)
     metric = args.metric
-    lower_better = metric == "最大回撤"
+    # 全部指标统一"越大越好": 最大回撤是负数(如 -6.7%), 最浅的回撤数值最大,
+    # 才是"最好"。曾按"回撤越小越好"处理 —— 负数比较下恰好反转, 把最深回撤
+    # 标成最优参数, 教学卖点(参数热力图)上的指标语义错误。
+    lower_better = False
 
     print(f"[数据] 下载 {args.astock} ...")
     df = datasource.fetch_daily_with_cache(args.astock)

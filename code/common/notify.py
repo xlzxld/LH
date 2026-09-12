@@ -26,14 +26,27 @@ import urllib.request
 
 from common import config
 
-# Windows 控制台默认 GBK：emoji（🔔💓）会让 print 直接 UnicodeEncodeError。
-# 统一切到 UTF-8 输出，遇到编码不了的字符用占位替代，绝不崩主流程。
-for _stream in (sys.stdout, sys.stderr):
-    if hasattr(_stream, "reconfigure"):
-        try:
-            _stream.reconfigure(encoding="utf-8", errors="replace")
-        except Exception as exc:  # 降级失败要吭声：否则后续 emoji print 崩溃时无从排查
-            print(f"[警告] 输出编码切换失败（{exc}），保留默认编码", file=sys.stderr)
+_stdio_ready = False
+
+
+def ensure_utf8_stdio() -> None:
+    """把 stdout/stderr 切到 UTF-8（可重复调用，已切过就跳过）。
+
+    Windows 控制台默认 GBK：emoji（🔔💓）会让 print 直接 UnicodeEncodeError。
+    统一切到 UTF-8 输出，遇到编码不了的字符用占位替代，绝不崩主流程。
+    注意：这是 CLI 进程级设置，放在这里做成显式函数、由各入口(main)调用，
+    而不是 import 即生效 —— 库模块不该在 importer 毫不知情时改写全局输出流。
+    """
+    global _stdio_ready
+    if _stdio_ready:
+        return
+    for _stream in (sys.stdout, sys.stderr):
+        if hasattr(_stream, "reconfigure"):
+            try:
+                _stream.reconfigure(encoding="utf-8", errors="replace")
+            except Exception as exc:  # 降级失败要吭声：否则后续 emoji print 崩溃时无从排查
+                print(f"[警告] 输出编码切换失败（{exc}），保留默认编码", file=sys.stderr)
+    _stdio_ready = True
 
 
 class NotifyError(RuntimeError):
@@ -123,6 +136,7 @@ def send_text(title: str, content: str, *, raise_on_fail: bool = False) -> bool:
     :param raise_on_fail: True 时发送失败抛异常；默认只打印警告，不打断主流程
     :return: 是否成功
     """
+    ensure_utf8_stdio()  # 消息文案含 emoji：推送前确保输出流已是 UTF-8
     channel = config.notify_channel()
     if channel == "off":
         print(f"\n[微信推送已关闭 NOTIFY_CHANNEL=off] {title}\n{content}\n")

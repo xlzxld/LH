@@ -39,7 +39,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from ch03_data import datasource  # noqa: E402
 from ch04_backtest.strategy import dual_ma_weights  # noqa: E402
 from common import config  # noqa: E402
-from common.notify import send_text  # noqa: E402
+from common.notify import ensure_utf8_stdio, send_text  # noqa: E402
 from common.state import load_state, save_state  # noqa: E402
 
 STATE_FILE = config.STATE_DIR / "monitor_state.json"
@@ -170,7 +170,9 @@ def commit(code: str, fresh: list[dict], state: dict) -> None:
     today = date.today().isoformat()
     for s in fresh:
         sent[s["key"]] = today
-    state[code]["sent"] = dict(sorted(sent.items())[-50:])
+    # 按记录日期值排序截断: 曾按键名字典序 —— ma_* 排在 breakout_*/dd_* 前面,
+    # ma 类记录一多会把较新的冷却记录挤出窗口, 导致信号重复推送
+    state[code]["sent"] = dict(sorted(sent.items(), key=lambda kv: kv[1])[-50:])
 
 
 # ================================================================ 主流程
@@ -185,6 +187,7 @@ def in_trading_hours(now: datetime) -> bool:
 
 def run_check(force: bool = False, codes_override: str | None = None) -> None:
     """执行一轮检查：拉数据 -> 算信号 -> 去重 -> 组装消息 -> 推送成功才落状态。"""
+    ensure_utf8_stdio()  # 消息文案含 emoji：Windows GBK 控制台需先切 UTF-8 输出
     codes = parse_watchlist(codes_override)
     state = load_state(STATE_FILE)
     report_lines: list[str] = []
@@ -210,9 +213,12 @@ def run_check(force: bool = False, codes_override: str | None = None) -> None:
         has_quote = quotes is not None and not quotes.empty and code in quotes.index
         name = str(quotes.loc[code, "名称"]) if has_quote else code
         daily_close = float(df["close"].iloc[-1])
-        live_price = float(quotes.loc[code, "最新价"]) if has_quote else None
-        if live_price and not pd.isna(live_price) and live_price > 0:
-            price = live_price  # 盘中推"昨日收盘"当现价会误导人，优先实时快照
+        # 东财快照对停牌/异常标的返回 "-" 字符串: 曾直接 float() 抛 ValueError,
+        # 且不在捕获区内, 整轮监测当天崩溃(cron 调度下所有标的都不再检查)。
+        # to_numeric 强转 NaN, 落到下方回退逻辑用日线收盘价。
+        live_price = pd.to_numeric(quotes.loc[code, "最新价"], errors="coerce") if has_quote else None
+        if live_price is not None and not pd.isna(live_price) and live_price > 0:
+            price = float(live_price)  # 盘中推"昨日收盘"当现价会误导人，优先实时快照
         else:
             price = daily_close
         as_of = f"，数据截至 {df.index[-1].date()}" + ("（本地缓存）" if from_cache else "")

@@ -72,7 +72,9 @@ def compute_stats(
     excess = returns.mean() * periods_per_year - risk_free_rate
     sharpe = excess / vol if vol > 1e-12 else 0.0
 
-    downside = returns[returns < 0]
+    # 下行风险按标准口径: 对全部收益取 min(r, 0) 后求二阶矩 —— 曾只对"负收益
+    # 子集"求 std, 正收益多的策略分母被人为缩小, 索提诺比率被系统性高估
+    downside = returns.clip(upper=0.0)
     downside_vol = downside.std(ddof=1) * np.sqrt(periods_per_year) if len(downside) > 1 else 0.0
     sortino = (returns.mean() * periods_per_year - risk_free_rate) / downside_vol if downside_vol > 1e-12 else 0.0
 
@@ -110,7 +112,10 @@ def trade_stats(trades: list[dict]) -> dict:
             sell_shares = min(t["shares"], open_shares)
             if sell_shares <= 0:
                 continue
-            proceeds = sell_shares * t["price"] - t.get("fee", 0.0)
+            # 卖出到手 = 市值 - 佣金 - 印花税(引擎对 A股个股会记 tax 字段,
+            # 曾被漏算 → 个股口径下单笔收益与胜率略被高估)
+            proceeds = (sell_shares * t["price"]
+                        - t.get("fee", 0.0) - t.get("tax", 0.0))
             avg_cost = open_cost / open_shares if open_shares > 1e-12 else 0.0
             closed.append(proceeds / (avg_cost * sell_shares) - 1.0 if avg_cost > 0 else 0.0)
             open_shares -= sell_shares

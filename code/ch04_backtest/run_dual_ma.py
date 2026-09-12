@@ -39,9 +39,18 @@ CRYPTO_MINUTES_PER_YEAR = 365 * 24 * 60  # 加密货币 7×24 全年无休
 def crypto_periods(timeframe: str) -> int:
     """
     加密货币的年化基数 = 一年的K线根数（按自然年；A股是 252 个交易日，别搞混）。
-    支持分钟/小时/天/周级；认不出的周期按日线(365)保守处理并警告——
+    支持分钟/小时/天/周/月级；认不出的周期按日线(365)保守处理并警告——
     绝不能静默用错口径（5m 错按 365 算会让年化差 200 倍以上）。
     """
+    # 月线: ccxt 用大写 "1M"(与分钟 "1m" 靠大小写区分)。曾不认识, 落到
+    # "未知周期"分支按日线 365 处理, 月线年化被放大约 30 倍
+    if timeframe.endswith("M"):
+        try:
+            int(timeframe[:-1])
+            return 12
+        except ValueError:
+            print(f"[警告] 未知K线周期 {timeframe!r}，年化基数按日线(365)保守计算")
+            return 365
     mult = {"m": 1, "h": 60, "d": 1440, "w": 10080}
     try:
         minutes = int(timeframe[:-1]) * mult[timeframe[-1]]
@@ -53,6 +62,12 @@ def crypto_periods(timeframe: str) -> int:
         print(f"[警告] K线周期 {timeframe!r} 长于一周，年化基数按 52（周线）保守计算")
         return 52
     return periods
+
+
+def _today():
+    """本地时区的"今天"(盘中未收盘 bar 判定用; 单独出函数便于测试)。"""
+    from datetime import datetime
+    return datetime.now()
 
 
 def _load_local_csv(path: str) -> pd.DataFrame:
@@ -98,9 +113,14 @@ def main() -> None:
     parser.add_argument("--execute-on", default="next_open", choices=["close", "next_open"])
     parser.add_argument("--no-plot", action="store_true")
     args = parser.parse_args()
+    # fast/slow 语义校验 (live_bot 入口有, 回测入口曾漏): 反着填会输出
+    # 语义反转的信号且不报错, 新手很难发现哪里不对
+    if args.slow <= args.fast:
+        parser.error(f"慢线窗口({args.slow})必须大于快线({args.fast})")
 
     # ---- 1. 取数据
     periods = None  # 交给引擎按日历自动推断（含周末→365，A股→252）
+    _astock_trimmed = False  # A股盘中是否剔除了未收盘 bar（打印提示用）
     if args.csv:
         df = _load_local_csv(args.csv)
         name = Path(args.csv).stem
@@ -116,8 +136,14 @@ def main() -> None:
         df = datasource.fetch_daily_with_cache(args.astock, start=args.start, end=args.end)
         name = args.astock
         source = f"东财接口 {name}"
+        # 盘中运行时最后一根是当日未完成 bar(东财按实时价刷新), 拿它算
+        # 信号 = "用盘中价冒充收盘价", 收盘前可能翻转 —— 与第 8 章监测的
+        # 纪律一致, 一律剔除 (加密货币分支同样处理)
+        if len(df) > 1 and df.index[-1].date() == _today().date():
+            df = df.iloc[:-1]
+            _astock_trimmed = True
     print(f"\n[数据] {source}: {df.index[0].date()} ~ {df.index[-1].date()}，共 {len(df)} 根K线"
-          + ("（已剔除最后一根未收盘K线）" if args.crypto else ""))
+          + ("（已剔除最后一根未收盘K线）" if args.crypto or _astock_trimmed else ""))
 
     # ---- 2. 生成信号
     weights = dual_ma_weights(df, args.fast, args.slow)

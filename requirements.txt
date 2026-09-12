@@ -6,7 +6,11 @@ requests>=2.31
 python-dotenv>=1.0
 
 # 加密货币交易所统一接口（第 9 章需要）
-ccxt>=4.3
+# 钉住实测版本: ccxt 4.x 内市价买单语义发生过实质变化（旧版
+# createMarketBuyOrderRequiresPrice=True 时无 price 会抛 ArgumentsRequired,
+# 实盘机器人会把它判成"永久性错误"直接停机）。升级前先重跑
+# code/ch07_binance/testnet_check.py 验证下单链路再改这里。
+ccxt==4.5.77
 
 # 测试
 pytest>=8.0

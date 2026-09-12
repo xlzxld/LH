@@ -146,6 +146,11 @@ def run_backtest(
             else:
                 max_notional = cash / (1.0 + commission_rate)  # 费用按比例
             notional = min(delta, max_notional)
+            # 现金护栏二次收口(L1): min_fee 临界区里按比例解出的 notional 会被
+            # 最低佣金托底反超 —— notional*rate < min_fee 但 notional+min_fee >
+            # cash(如 cash=1000, rate=1%, min_fee=9.95 时曾成交 1000.05 元),
+            # 用实际 fee 再钳一次, 保证现金永不为负
+            notional = min(notional, cash - _fee(notional))
             if notional <= 0:
                 return
             fee = _fee(notional)
@@ -192,9 +197,16 @@ def run_backtest(
             # 1) 执行昨天的排队项：止损优先（它取消同一天的普通信号）
             if i > 0:
                 if pending_stop:
-                    _execute(0.0, float(row["open"]), when, is_stop=True)
-                    armed = False  # 止损后锁仓，等新的 0→1 跳变
-                    pending_stop = False
+                    _px = float(row["open"])
+                    if _px and not pd.isna(_px) and _px > 0:
+                        _execute(0.0, _px, when, is_stop=True)
+                        armed = False  # 止损后锁仓，等新的 0→1 跳变
+                        pending_stop = False
+                    else:
+                        # 开盘价非法(数据损坏)时保留止损单到下一根执行 ——
+                        # 曾直接吞掉: armed/pending_stop 已被清, 持仓裸奔无警告
+                        print(f"[警告] {when.date()} 开盘价非法({row['open']})，"
+                              f"止损单顺延到下一根K线执行")
                 elif pending_weight is not None:
                     if armed or pending_weight <= 0:
                         _execute(pending_weight, float(row["open"]), when)

@@ -12,6 +12,7 @@
 """
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -58,6 +59,13 @@ def main() -> None:
 
     # ---- 测试 3：最小交易权限验证 —— 挂一张远离市价的测试限价单，
     #      无论挂上与否都在 finally 里按订单 id 撤掉（绝不留残留挂单在账户里）
+    # 真实账户上的自动下单必须默认跳过：虽然金额极小(0.00001 BTC @ 10% 市价)
+    # 且有撤单兜底, 但"自检脚本往真账户下单"不应是无条件行为 —— 要跑需显式
+    # 设环境变量 ALLOW_REAL_ACCOUNT_ORDER=1。
+    if not sandbox and os.environ.get("ALLOW_REAL_ACCOUNT_ORDER") != "1":
+        print("[3/3] 跳过（真实账户默认不做自动下单测试；确需验证请设 "
+              "ALLOW_REAL_ACCOUNT_ORDER=1 后重跑）")
+        return
     try:
         price = exchange.fetch_ticker("BTC/USDT")["last"]
         order_id = None

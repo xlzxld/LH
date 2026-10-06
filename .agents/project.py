@@ -6,6 +6,6 @@
 __all__ = ["FMT_CHECK_CMD", "LINT_CMD", "TEST_CMD", "BUILD_CMD"]
 
 FMT_CHECK_CMD = None
-LINT_CMD = None
+LINT_CMD = "python .agents/structure_guard.py --quiet --color never ."
 TEST_CMD = r".venv\Scripts\python.exe -m pytest code/tests/ -q"
 BUILD_CMD = None
